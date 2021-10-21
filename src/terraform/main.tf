@@ -1,5 +1,17 @@
+# Define Terraform provider
+terraform {
+  required_version = ">=0.12"
+}
+# Configure the Azure provider
 provider "azurerm" {
+ 
   features {}
+
+}
+# packer image
+data "azurerm_image" "image" {
+  name                = var.packer_image_name
+  resource_group_name = var.packer_resource_group
 }
 
 #create the resource group 
@@ -17,7 +29,7 @@ resource "azurerm_virtual_network" "main" {
 }
 
 resource "azurerm_subnet" "main" {
-  name                 = "internal"
+  name                 = "${var.prefix}-subnet"
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.0.2.0/24"]
@@ -29,19 +41,78 @@ resource "azurerm_network_security_group" "main" {
   name                = "${var.prefix}-netsg"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-
-  security_rule {
-    name                       = "VM"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "8080"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
 }
+
+resource "azurerm_network_security_rule" "HTTP"{
+  name                       = "http"
+  priority                   = 100
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "Tcp"
+  source_port_range          = "*"
+  destination_port_range     = "8080"
+  source_address_prefix      = "*"
+  destination_address_prefix = "*"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}
+
+resource "azurerm_network_security_rule" "Vnet-Inbound"{
+  name                       = "Vnet-Inbound-Allow"
+  priority                   = 150
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "*"
+  source_port_range          = "*"
+  destination_port_range     = "*"
+  source_address_prefix      = "VirtualNetwork"
+  destination_address_prefix = "VirtualNetwork"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}
+
+resource "azurerm_network_security_rule" "LB-Inbound"{
+  name                       = "LB-Inbound-Allow"
+  priority                   = 200
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "*"
+  source_port_range          = "*"
+  destination_port_range     = "*"
+  source_address_prefix      = "AzureLoadBalancer"
+  destination_address_prefix = "*"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}
+
+resource "azurerm_network_security_rule" "Inbound-Deny"{
+  name                       = "Inbound-Deny"
+  priority                   = 250
+  direction                  = "Inbound"
+  access                     = "Deny"
+  protocol                   = "*"
+  source_port_range          = "*"
+  destination_port_range     = "*"
+  source_address_prefix      = "*"
+  destination_address_prefix = "*"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}
+
+resource "azurerm_network_security_rule" "Vnet-Outbound-Allow"{
+  name                       = "Inbound-Deny"
+  priority                   = 300
+  direction                  = "Outbound"
+  access                     = "Allow"
+  protocol                   = "*"
+  source_port_range          = "*"
+  destination_port_range     = "*"
+  source_address_prefix      = "VirtualNetwork"
+  destination_address_prefix = "VirtualNetwork"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}
+
 
 resource "azurerm_subnet_network_security_group_association" "main" {
   subnet_id                 = azurerm_subnet.main.id
@@ -50,12 +121,13 @@ resource "azurerm_subnet_network_security_group_association" "main" {
 
 # Create network interface
 resource "azurerm_network_interface" "main" {
-  name                = "${var.prefix}-nic"
+  name                = "${var.prefix}-${count.index}-nic"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   count = var.vm_number
 
   ip_configuration {
+    primary                       = true
     name                          = "internal"
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Dynamic"
@@ -115,14 +187,7 @@ resource "azurerm_lb_rule" "main" {
   backend_address_pool_id        = azurerm_lb_backend_address_pool.main.id
 }
 
-data "azurerm_resource_group" "image" {
-  name                = var.packer_resource_group
-}
 
-data "azurerm_image" "image" {
-  name                = var.packer_image_name
-  resource_group_name = data.azurerm_resource_group.image.name
-}
 
 resource "azurerm_availability_set" "main" {
   name                        = "${var.prefix}-aset"
@@ -144,6 +209,7 @@ resource "azurerm_linux_virtual_machine" "main" {
   network_interface_ids = [element(azurerm_network_interface.main.*.id, count.index)]
   availability_set_id = azurerm_availability_set.main.id
 
+  source_image_id = data.azurerm_image.image.id
 
   os_disk {
     storage_account_type = "Standard_LRS"

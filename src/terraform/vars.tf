@@ -16,7 +16,7 @@ variable "resource_group" {
 
 variable "packer_resource_group" {
   description = "Name of the resource group where the packer image is"
-  default     =  "udacity-azure-packer"
+  default     =  "udemy-azure-packer"
   type        = string
 }
 
@@ -28,7 +28,7 @@ variable "packer_image_name" {
 
 variable "vm_number" {
   description = "Number of VM resources created in load balancer"
-  default     = 1
+  default     = 3
   type        = number
 }
 
